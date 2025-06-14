@@ -9,16 +9,51 @@ class OrderManager {
     constructor() {
         this.orders = new Map();
         this.timers = new Map(); // Pentru a ține evidența timer-elor
-        this.loadOrders();
-        this.setupEventListeners();
-        this.startAutoUpdate();
-        this.startSync();
+        this.lastSync = 0;
+        this.initializeData();
     }
 
-    // Încarcă comenzile din localStorage și sincronizează cu GitHub
+    // Inițializează datele
+    async initializeData() {
+        try {
+            // Verifică dacă fișierul există
+            const checkResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
+                headers: {
+                    'Authorization': `token ${GITHUB_TOKEN}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+
+            if (!checkResponse.ok) {
+                // Dacă fișierul nu există, creează-l
+                await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `token ${GITHUB_TOKEN}`,
+                        'Accept': 'application/vnd.github.v3+json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: 'Creare fișier data.json',
+                        content: btoa(JSON.stringify([]))
+                    })
+                });
+                console.log('Fișierul data.json a fost creat cu succes!');
+            }
+
+            // După ce ne-am asigurat că fișierul există, încarcă datele
+            await this.loadOrders();
+            this.setupEventListeners();
+            this.startAutoUpdate();
+            this.startSync();
+        } catch (error) {
+            console.error('Eroare la inițializarea datelor:', error);
+        }
+    }
+
+    // Încarcă comenzile din GitHub
     async loadOrders() {
         try {
-            // Încearcă să încarce datele din GitHub
             const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
                 headers: {
                     'Authorization': `token ${GITHUB_TOKEN}`,
@@ -29,38 +64,22 @@ class OrderManager {
             if (response.ok) {
                 const data = await response.json();
                 const content = JSON.parse(atob(data.content));
+                this.orders.clear(); // Șterge comenzile existente
                 content.forEach(order => {
                     this.orders.set(order.id, order);
                 });
-            } else {
-                // Dacă nu există date pe GitHub, încarcă din localStorage
-                const savedOrders = localStorage.getItem('orders');
-                if (savedOrders) {
-                    const orders = JSON.parse(savedOrders);
-                    orders.forEach(order => {
-                        this.orders.set(order.id, order);
-                    });
-                }
+                this.lastSync = Date.now();
             }
         } catch (error) {
             console.error('Eroare la încărcarea datelor:', error);
-            // Încarcă din localStorage ca backup
-            const savedOrders = localStorage.getItem('orders');
-            if (savedOrders) {
-                const orders = JSON.parse(savedOrders);
-                orders.forEach(order => {
-                    this.orders.set(order.id, order);
-                });
-            }
         }
         this.updateDisplay();
     }
 
-    // Salvează comenzile în localStorage și pe GitHub
+    // Salvează comenzile pe GitHub
     async saveOrders() {
         const ordersArray = Array.from(this.orders.values());
-        localStorage.setItem('orders', JSON.stringify(ordersArray));
-
+        
         try {
             // Verifică dacă fișierul există pe GitHub
             const checkResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
@@ -92,6 +111,7 @@ class OrderManager {
                     sha: sha
                 })
             });
+            this.lastSync = Date.now();
         } catch (error) {
             console.error('Eroare la salvarea datelor pe GitHub:', error);
         }
@@ -103,7 +123,7 @@ class OrderManager {
     }
 
     // Adaugă o comandă nouă
-    addOrder(eventName, address, deliveryTime) {
+    async addOrder(eventName, address, deliveryTime) {
         const order = {
             id: this.generateOrderId(),
             eventName,
@@ -113,12 +133,12 @@ class OrderManager {
             createdAt: Date.now()
         };
         this.orders.set(order.id, order);
-        this.saveOrders();
+        await this.saveOrders();
         this.updateDisplay();
     }
 
     // Confirmă livrarea unei comenzi
-    confirmDelivery(orderId, hasReturn, returnTime = null) {
+    async confirmDelivery(orderId, hasReturn, returnTime = null) {
         const order = this.orders.get(orderId);
         if (!order) return;
 
@@ -128,10 +148,9 @@ class OrderManager {
         } else {
             order.status = 'delivered';
             order.deliveredAt = Date.now();
-            this.saveToHistory(order, 'delivered');
         }
 
-        this.saveOrders();
+        await this.saveOrders();
         this.updateDisplay();
     }
 
@@ -159,7 +178,7 @@ class OrderManager {
     }
 
     // Editează o comandă
-    editOrder(orderId, eventName, address, deliveryTime) {
+    async editOrder(orderId, eventName, address, deliveryTime) {
         const order = this.orders.get(orderId);
         if (!order) return;
 
@@ -167,7 +186,7 @@ class OrderManager {
         order.address = address;
         order.deliveryTime = new Date(deliveryTime).getTime();
         
-        this.saveOrders();
+        await this.saveOrders();
         this.updateDisplay();
     }
 
@@ -489,53 +508,34 @@ class OrderManager {
     }
 
     // Anulează o comandă
-    cancelOrder(orderId) {
+    async cancelOrder(orderId) {
         // Oprește timer-ul înainte de a șterge comanda
         if (this.timers.has(orderId)) {
             clearInterval(this.timers.get(orderId));
             this.timers.delete(orderId);
         }
         this.orders.delete(orderId);
-        this.saveOrders();
+        await this.saveOrders();
         this.updateDisplay();
     }
 
     // Finalizează o comandă cu ridicare
-    completeOrder(orderId) {
+    async completeOrder(orderId) {
         const order = this.orders.get(orderId);
         if (!order) return;
 
         order.status = 'delivered';
         order.returnCompleted = true;
-        this.saveToHistory(order, 'returnCompleted');
-        this.saveOrders();
+        await this.saveOrders();
         this.updateDisplay();
-    }
-
-    // Salvează în istoric
-    saveToHistory(order, action) {
-        const entry = {
-            id: order.id,
-            eventName: order.eventName,
-            address: order.address,
-            createdAt: order.createdAt,
-            deliveryTime: order.deliveryTime,
-            deliveredAt: order.deliveredAt || (action === 'delivered' ? Date.now() : null),
-            returnScheduled: !!order.returnTime,
-            returnTime: order.returnTime || null,
-            returnCompletedAt: order.returnCompleted && order.status === 'delivered' ? Date.now() : null
-        };
-
-        const history = JSON.parse(localStorage.getItem('istoric_livrari') || '[]');
-        history.push(entry);
-        localStorage.setItem('istoric_livrari', JSON.stringify(history));
     }
 
     // Pornește sincronizarea automată
     startSync() {
+        // Sincronizează la fiecare 5 secunde
         setInterval(async () => {
             await this.loadOrders();
-        }, 30000); // Sincronizează la fiecare 30 de secunde
+        }, 5000);
     }
 }
 
