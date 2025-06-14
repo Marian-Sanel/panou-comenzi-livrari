@@ -59,17 +59,17 @@ class OrderManager {
         }
     }
 
-    // Încarcă comenzile din GitHub
+    // Încarcă comenzile din GitHub și localStorage
     async loadOrders() {
         if (this.isLoading) return;
         this.isLoading = true;
 
         try {
+            // Încearcă să încarce din GitHub
             const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
                 headers: {
                     'Authorization': `token ${GITHUB_TOKEN}`,
-                    'Accept': 'application/vnd.github.v3+json',
-                    'Cache-Control': 'no-cache'
+                    'Accept': 'application/vnd.github.v3+json'
                 }
             });
 
@@ -96,29 +96,42 @@ class OrderManager {
                     content.forEach(order => {
                         this.orders.set(order.id, order);
                     });
+                    // Salvează în localStorage
+                    localStorage.setItem('orders', JSON.stringify(content));
                     this.updateDisplay();
                 }
                 
                 this.lastSync = Date.now();
             }
         } catch (error) {
-            console.error('Eroare la încărcarea datelor:', error);
+            console.error('Eroare la încărcarea datelor din GitHub:', error);
+            // Încarcă din localStorage ca backup
+            const savedOrders = localStorage.getItem('orders');
+            if (savedOrders) {
+                const orders = JSON.parse(savedOrders);
+                this.orders.clear();
+                orders.forEach(order => {
+                    this.orders.set(order.id, order);
+                });
+                this.updateDisplay();
+            }
         } finally {
             this.isLoading = false;
         }
     }
 
-    // Salvează comenzile pe GitHub
+    // Salvează comenzile în GitHub și localStorage
     async saveOrders() {
         const ordersArray = Array.from(this.orders.values());
+        // Salvează în localStorage
+        localStorage.setItem('orders', JSON.stringify(ordersArray));
         
         try {
             // Verifică dacă fișierul există pe GitHub
             const checkResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
                 headers: {
                     'Authorization': `token ${GITHUB_TOKEN}`,
-                    'Accept': 'application/vnd.github.v3+json',
-                    'Cache-Control': 'no-cache'
+                    'Accept': 'application/vnd.github.v3+json'
                 }
             });
 
@@ -136,8 +149,7 @@ class OrderManager {
                 headers: {
                     'Authorization': `token ${GITHUB_TOKEN}`,
                     'Accept': 'application/vnd.github.v3+json',
-                    'Content-Type': 'application/json',
-                    'Cache-Control': 'no-cache'
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
                     message: 'Actualizare date comenzi',
@@ -566,15 +578,10 @@ class OrderManager {
 
     // Pornește sincronizarea automată
     startSync() {
-        // Sincronizează la fiecare 2 secunde
+        // Sincronizează la fiecare 5 secunde
         setInterval(async () => {
             await this.loadOrders();
-        }, 2000);
-
-        // Sincronizează și când fereastra devine activă
-        window.addEventListener('focus', () => {
-            this.loadOrders();
-        });
+        }, 5000);
     }
 }
 
