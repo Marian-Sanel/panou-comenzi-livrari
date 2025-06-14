@@ -11,7 +11,10 @@ class OrderManager {
         this.timers = new Map(); // Pentru a ține evidența timer-elor
         this.lastSync = 0;
         this.isLoading = false;
-        this.initializeData();
+        this.loadOrders();
+        this.setupEventListeners();
+        this.startAutoUpdate();
+        this.startSync();
         
         // Adaugă event listener pentru sincronizare când fereastra devine vizibilă
         document.addEventListener('visibilitychange', () => {
@@ -21,49 +24,8 @@ class OrderManager {
         });
     }
 
-    // Inițializează datele
-    async initializeData() {
-        try {
-            // Verifică dacă fișierul există
-            const checkResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
-                headers: {
-                    'Authorization': `token ${GITHUB_TOKEN}`,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
-            });
-
-            if (!checkResponse.ok) {
-                // Dacă fișierul nu există, creează-l
-                await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `token ${GITHUB_TOKEN}`,
-                        'Accept': 'application/vnd.github.v3+json',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        message: 'Creare fișier data.json',
-                        content: btoa(JSON.stringify([]))
-                    })
-                });
-                console.log('Fișierul data.json a fost creat cu succes!');
-            }
-
-            // După ce ne-am asigurat că fișierul există, încarcă datele
-            await this.loadOrders();
-            this.setupEventListeners();
-            this.startAutoUpdate();
-            this.startSync();
-        } catch (error) {
-            console.error('Eroare la inițializarea datelor:', error);
-        }
-    }
-
-    // Încarcă comenzile din GitHub și localStorage
+    // Încarcă comenzile
     async loadOrders() {
-        if (this.isLoading) return;
-        this.isLoading = true;
-
         try {
             // Încearcă să încarce din GitHub
             const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
@@ -76,58 +38,26 @@ class OrderManager {
             if (response.ok) {
                 const data = await response.json();
                 const content = JSON.parse(atob(data.content));
-                
-                // Verifică dacă sunt modificări noi
-                let hasChanges = false;
-                if (this.orders.size !== content.length) {
-                    hasChanges = true;
-                } else {
-                    for (const order of content) {
-                        const existingOrder = this.orders.get(order.id);
-                        if (!existingOrder || JSON.stringify(existingOrder) !== JSON.stringify(order)) {
-                            hasChanges = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (hasChanges) {
-                    this.orders.clear();
-                    content.forEach(order => {
-                        this.orders.set(order.id, order);
-                    });
-                    // Salvează în localStorage
-                    localStorage.setItem('orders', JSON.stringify(content));
-                    this.updateDisplay();
-                }
-                
-                this.lastSync = Date.now();
-            }
-        } catch (error) {
-            console.error('Eroare la încărcarea datelor din GitHub:', error);
-            // Încarcă din localStorage ca backup
-            const savedOrders = localStorage.getItem('orders');
-            if (savedOrders) {
-                const orders = JSON.parse(savedOrders);
                 this.orders.clear();
-                orders.forEach(order => {
+                content.forEach(order => {
                     this.orders.set(order.id, order);
                 });
                 this.updateDisplay();
+            } else {
+                // Dacă fișierul nu există, creează-l
+                await this.saveOrders([]);
             }
-        } finally {
-            this.isLoading = false;
+        } catch (error) {
+            console.error('Eroare la încărcarea datelor:', error);
         }
     }
 
-    // Salvează comenzile în GitHub și localStorage
-    async saveOrders() {
-        const ordersArray = Array.from(this.orders.values());
-        // Salvează în localStorage
-        localStorage.setItem('orders', JSON.stringify(ordersArray));
+    // Salvează comenzile
+    async saveOrders(ordersToSave = null) {
+        const ordersArray = ordersToSave || Array.from(this.orders.values());
         
         try {
-            // Verifică dacă fișierul există pe GitHub
+            // Verifică dacă fișierul există
             const checkResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
                 headers: {
                     'Authorization': `token ${GITHUB_TOKEN}`,
@@ -143,7 +73,7 @@ class OrderManager {
                 sha = data.sha;
             }
 
-            // Actualizează sau creează fișierul pe GitHub
+            // Actualizează sau creează fișierul
             await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
                 method: 'PUT',
                 headers: {
@@ -157,9 +87,8 @@ class OrderManager {
                     sha: sha
                 })
             });
-            this.lastSync = Date.now();
         } catch (error) {
-            console.error('Eroare la salvarea datelor pe GitHub:', error);
+            console.error('Eroare la salvarea datelor:', error);
         }
     }
 
@@ -578,10 +507,10 @@ class OrderManager {
 
     // Pornește sincronizarea automată
     startSync() {
-        // Sincronizează la fiecare 5 secunde
+        // Sincronizează la fiecare 3 secunde
         setInterval(async () => {
             await this.loadOrders();
-        }, 5000);
+        }, 3000);
     }
 }
 
