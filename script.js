@@ -1,10 +1,7 @@
 // Configurare GitHub
-const GITHUB_TOKEN = localStorage.getItem('github_token') || prompt('Introdu token-ul tău GitHub:');
-if (GITHUB_TOKEN) {
-    localStorage.setItem('github_token', GITHUB_TOKEN);
-}
-const GITHUB_REPO = 'Marian-Sanel/panou-comenzi-livrari';
-const DATA_FILE = 'data.json';
+const GITHUB_TOKEN = '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'; // TOKENUL tău GitHub
+const GITHUB_REPO = 'Marian-Sanel/panou-comenzi-livrari'; // username + repository
+const DATA_FILE = 'data.json'; // fișierul pe care îl modifici în repo
 
 
 // Clasa pentru gestionarea comenzilor
