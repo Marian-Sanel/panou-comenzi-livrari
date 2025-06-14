@@ -10,7 +10,15 @@ class OrderManager {
         this.orders = new Map();
         this.timers = new Map(); // Pentru a ține evidența timer-elor
         this.lastSync = 0;
+        this.isLoading = false;
         this.initializeData();
+        
+        // Adaugă event listener pentru sincronizare când fereastra devine vizibilă
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                this.loadOrders();
+            }
+        });
     }
 
     // Inițializează datele
@@ -53,27 +61,51 @@ class OrderManager {
 
     // Încarcă comenzile din GitHub
     async loadOrders() {
+        if (this.isLoading) return;
+        this.isLoading = true;
+
         try {
             const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
                 headers: {
                     'Authorization': `token ${GITHUB_TOKEN}`,
-                    'Accept': 'application/vnd.github.v3+json'
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Cache-Control': 'no-cache'
                 }
             });
 
             if (response.ok) {
                 const data = await response.json();
                 const content = JSON.parse(atob(data.content));
-                this.orders.clear(); // Șterge comenzile existente
-                content.forEach(order => {
-                    this.orders.set(order.id, order);
-                });
+                
+                // Verifică dacă sunt modificări noi
+                let hasChanges = false;
+                if (this.orders.size !== content.length) {
+                    hasChanges = true;
+                } else {
+                    for (const order of content) {
+                        const existingOrder = this.orders.get(order.id);
+                        if (!existingOrder || JSON.stringify(existingOrder) !== JSON.stringify(order)) {
+                            hasChanges = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (hasChanges) {
+                    this.orders.clear();
+                    content.forEach(order => {
+                        this.orders.set(order.id, order);
+                    });
+                    this.updateDisplay();
+                }
+                
                 this.lastSync = Date.now();
             }
         } catch (error) {
             console.error('Eroare la încărcarea datelor:', error);
+        } finally {
+            this.isLoading = false;
         }
-        this.updateDisplay();
     }
 
     // Salvează comenzile pe GitHub
@@ -85,7 +117,8 @@ class OrderManager {
             const checkResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`, {
                 headers: {
                     'Authorization': `token ${GITHUB_TOKEN}`,
-                    'Accept': 'application/vnd.github.v3+json'
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Cache-Control': 'no-cache'
                 }
             });
 
@@ -103,7 +136,8 @@ class OrderManager {
                 headers: {
                     'Authorization': `token ${GITHUB_TOKEN}`,
                     'Accept': 'application/vnd.github.v3+json',
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'no-cache'
                 },
                 body: JSON.stringify({
                     message: 'Actualizare date comenzi',
@@ -532,10 +566,15 @@ class OrderManager {
 
     // Pornește sincronizarea automată
     startSync() {
-        // Sincronizează la fiecare 5 secunde
+        // Sincronizează la fiecare 2 secunde
         setInterval(async () => {
             await this.loadOrders();
-        }, 5000);
+        }, 2000);
+
+        // Sincronizează și când fereastra devine activă
+        window.addEventListener('focus', () => {
+            this.loadOrders();
+        });
     }
 }
 
